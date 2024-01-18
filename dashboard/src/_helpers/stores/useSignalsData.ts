@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { ISignalsData } from "../validation/signals-data";
+import { ISignalsData } from "../validation/controller";
 
 type ISendingEvent = {
   value: boolean;

@@ -1,30 +1,35 @@
 import {
+  ControllerMode,
   IPhaseValuesObj,
   ISignalsData,
-} from "@/_helpers/validation/signals-data";
+} from "@/_helpers/validation/controller";
 import { useState } from "react";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
 import { useSignalsDataStore } from "@/_helpers/stores/useSignalsData";
 import { toast } from "sonner";
 import { socket } from "@/_services/socketio";
+import { useSocketConnection } from "./hooks/useSocketCon";
+import { Spinner } from "./ui/spinner";
 
 type ISignal = "master" | "slave";
 
 export function SingalDetailsView({ signal }: { signal: ISignal }) {
-  const [phaseTimeValues, setPhaseTimeValues] = useState<IPhaseValuesObj>();
+  const [phaseTimeValues, setPhaseTimeValues] = useState<IPhaseValuesObj | null>();
   const { signalsData, sendingEvent, setSendingEvent } = useSignalsDataStore();
+  const { controllerConnected, socketConnected } = useSocketConnection();
+
 
   const sendToggleStateEvent = async () => {
     if (!signalsData) return;
-    const masterHold = signalsData?.smart_mode?.[1];
-    const slaveHold = signalsData?.smart_mode?.[1];
+    const masterHold = signalsData?.hold.master || false;
+    const slaveHold = signalsData?.hold.slave || false;
     setSendingEvent({ event: "hold-state", value: true });
 
     try {
       const res = await socket.timeout(10000).emitWithAck("hold-state", {
-        master: signal === "master" ? masterHold : masterHold === 0 ? 1 : 0,
-        slave: signal === "slave" ? slaveHold : slaveHold === 0 ? 1 : 0,
+        master: signal === "master" ? !masterHold : masterHold,
+        slave: signal === "slave" ? !slaveHold : slaveHold,
       });
       if (res?.status !== "success") throw new Error("Failed on toggle state");
     } catch (error) {
@@ -49,11 +54,17 @@ export function SingalDetailsView({ signal }: { signal: ISignal }) {
     try {
       let res: any = null;
       if (reset) {
-        res = await socket?.timeout(10000).emitWithAck("reset-phase-time");
+        res = await socket?.timeout(10000)?.emitWithAck("reset-phase-time", { signal: signal });
       } else {
         res = await socket
           ?.timeout(10000)
-          .emitWithAck("update-phase-time", phaseTimeValues);
+          ?.emitWithAck("update-phase-time", {
+            signal: signal,
+            value: {
+              ...signalsData?.phase_time?.[signal],
+              ...phaseTimeValues
+            }
+          });
       }
       if (res?.status !== "success") {
         throw new Error("Failed on update phase time");
@@ -74,6 +85,7 @@ export function SingalDetailsView({ signal }: { signal: ISignal }) {
       });
     } finally {
       setSendingEvent(null);
+      window.location.reload()
     }
   };
 
@@ -91,16 +103,18 @@ export function SingalDetailsView({ signal }: { signal: ISignal }) {
         </div>
         <div className="text-center">
           <p>
-            Cycle Time : <span id="cycle-time">{signalsData?.cycle_time} sec</span>
+            Cycle Time : <span id="cycle-time">{signalsData?.cycle_time?.[signal]} sec</span>
           </p>
         </div>
       </div>
       <div className="space-y-3 mt-5">
-        {signalsData &&
+        {signalsData && socketConnected && controllerConnected &&
+          // {signalsData && socketConnected && controllerConnected &&
           [0, 1, 2, 3].map((phase) => (
             <SinglePhaseRow
               key={phase}
               phase={phase}
+              phaseTimeInpValue={phaseTimeValues?.[phase]}
               onPhaseTimeChange={(time) => {
                 setPhaseTimeValues({
                   ...phaseTimeValues,
@@ -120,7 +134,7 @@ export function SingalDetailsView({ signal }: { signal: ISignal }) {
           type="button"
           variant={"green-outline"}
         >
-          {signalsData?.smart_mode?.[1] === 1 ? "Unhold " : "Hold "} <span className="capitalize ml-1">{signal}</span>
+          {signalsData?.hold?.[signal] ? "Skip " : "Hold "} <span className="capitalize ml-1">{signal}</span>
         </Button>
         <Button
           disabled={sendingEvent?.value}
@@ -151,6 +165,7 @@ export function SingalDetailsView({ signal }: { signal: ISignal }) {
 type SinglePhaseRowProps = {
   phase: number;
   onPhaseTimeChange?: (time: number) => void;
+  phaseTimeInpValue?: number;
   data: ISignalsData;
   signal: ISignal;
 };
@@ -160,12 +175,33 @@ type ISignalState = "green" | "yellow" | "red";
 function SinglePhaseRow({
   phase,
   onPhaseTimeChange,
+  phaseTimeInpValue,
   data,
   signal,
 }: SinglePhaseRowProps) {
+  const [updatingPhase, setUpdatingPhase] = useState(false)
+
   let signalState: ISignalState = "red";
-  if (data.green[signal] === phase) signalState = "green";
-  if (data.yellow[signal] === phase) signalState = "yellow";
+  if (data.green?.[signal] === phase) signalState = "green";
+  if (data.yellow?.[signal] === phase) signalState = "yellow";
+
+
+
+  const sendPhaseChangeEvent = async () => {
+    setUpdatingPhase(true)
+    try {
+      const res = await socket.timeout(5000).emitWithAck("switch-phase", { signal, phase });
+      if (res?.status !== "success") throw new Error("Failed on toggle state");
+    } catch (error) {
+
+    } finally {
+      setUpdatingPhase(false)
+    }
+  }
+
+
+
+
 
   return (
     <div className="w-full grid grid-cols-12 items-center gap-5">
@@ -189,19 +225,32 @@ function SinglePhaseRow({
 
       <div className="col-span-3">
         <p>
-          Countdown : <span>{data.elapsed_time[phase]}</span> sec
+          Countdown : <span>{data.elapsed_time[signal][phase]}</span> sec
         </p>
-        <h3>
-          Set Green : <span>{data.phase_time[phase]}</span> sec
-        </h3>
+        {
+          data.mode === ControllerMode.testing ?
+            <h3></h3> :
+            <h3>
+              Set Green : <span>{data.phase_time[signal][phase]}</span> sec
+            </h3>
+        }
       </div>
       <div className="col-span-3 w-full">
-        <input
-          type="number"
-          className="w-full"
-          placeholder="Between 10 and 100"
-          onChange={(e) => onPhaseTimeChange?.(e.target.valueAsNumber)}
-        />
+        {
+          data.mode === ControllerMode.testing ?
+            <Button disabled={updatingPhase} onClick={sendPhaseChangeEvent} >
+              {updatingPhase ? <Spinner /> : "Switch"}
+            </Button>
+            :
+            <input
+              type="number"
+              className="w-full"
+              placeholder="Between 10 and 100"
+              value={phaseTimeInpValue}
+              onChange={(e) => onPhaseTimeChange?.(e.target.valueAsNumber)}
+            />
+        }
+
       </div>
     </div>
   );

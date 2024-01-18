@@ -7,9 +7,8 @@ import {
   IPhaseValuesObj,
   ISignalsData,
   holdStateDataSchema,
-  phaseValuesObj,
   signalsDataSchema,
-} from "@/validation/iot-controller";
+} from "@/validation/controller";
 
 var sioServer: SocketIOServer | null = null;
 
@@ -33,19 +32,61 @@ const controllerEmitter = {
   sendHoldStateEvent: (data: IHoldStateData) => {
     sioServer?.sockets
       .to(ALLOWED_SOCKET_CLIENT_ID.CONTROLLER_CLIENT)
-      .emit("hold-state", data);
+      .emit("hold-state", {
+        master: data.master === true ? 1 : 0,
+        slave: data.slave === true ? 1 : 0,
+      });
   },
   /* Send `update phase time` event to controller */
-  sendUpdatePhaseTimeEvent: (data: IPhaseValuesObj) => {
+  sendUpdatePhaseTimeEvent: (data: {
+    signal: string;
+    value: IPhaseValuesObj;
+  }) => {
     sioServer?.sockets
       .to(ALLOWED_SOCKET_CLIENT_ID.CONTROLLER_CLIENT)
       .emit("update-phase-time", data);
   },
   /* Send `reset phase time to default` event to controller */
-  sendResetPhaseTimeEvent: () => {
+  sendResetPhaseTimeEvent: (data: { signal: string }) => {
     sioServer?.sockets
       .to(ALLOWED_SOCKET_CLIENT_ID.CONTROLLER_CLIENT)
-      .emit("reset-phase-time");
+      .emit("reset-phase-time", data);
+  },
+  sendControllerModeUpdateEvent: async (mode: string) => {
+    if (!sioServer) return false;
+    try {
+      let res = (await sioServer.sockets
+        .to(ALLOWED_SOCKET_CLIENT_ID.CONTROLLER_CLIENT)
+        .timeout(5000)
+        .emitWithAck("mode-update", mode));
+      console.log(res)
+      if (Array.isArray(res)) {
+        res = res?.[0];
+      }
+      if (res?.status !== "success") return false;
+      return true;
+    } catch (error) {
+      console.log("socketio/sendControllerModeUpdateEvent", error);
+      return false;
+    }
+  },
+  sendSwitchPhaseEvent: async (data: { signal: string; phase: number }) => {
+    if (!sioServer) return false;
+    try {
+      let res = (await sioServer.sockets
+        .to(ALLOWED_SOCKET_CLIENT_ID.CONTROLLER_CLIENT)
+        .timeout(5000)
+        .emitWithAck("switch-phase", data));
+      console.log(res)
+      if (Array.isArray(res)) {
+        res = res?.[0];
+      }
+      if (res?.status !== "success") return false;
+      return true;
+    } catch (error) {
+      console.log("socketio/sendSwitchPhaseEvent", error);
+      return false;
+    }
   },
 };
 
@@ -82,12 +123,29 @@ function handleSocketConnection(socket: Socket) {
         callback({ status: "failed" });
       }
     });
+    /* Listen for `mode-update` event */
+    socket.on("mode-update", async (mode, callback) => {
+      try {
+        console.log("socketio/mode-update", mode);
+        const eventSent = await controllerEmitter.sendControllerModeUpdateEvent(mode);
+        callback?.({ status: eventSent ? "success" : "failed" });
+      } catch (error) {
+        callback?.({ status: "failed" });
+      }
+    });
+    /* Listen for `switch-phase` event */
+    socket.on("switch-phase", async (data) => {
+      try {
+        console.log("socketio/switch-phase", data);
+        controllerEmitter.sendSwitchPhaseEvent(data);
+      } catch (error) { }
+    });
     /* Listen for `update-phase-time` event */
     socket.on("update-phase-time", async (reqData, callback) => {
       try {
-        const data = await phaseValuesObj.parseAsync(reqData);
-        console.log("socketio/update-phase-time", data);
-        controllerEmitter.sendUpdatePhaseTimeEvent(data);
+        // const data = await phaseValuesObj.parseAsync(reqData);
+        // console.log("socketio/update-phase-time", data);
+        controllerEmitter.sendUpdatePhaseTimeEvent(reqData);
         callback({ status: "success" });
       } catch (error) {
         console.error("socketio/update-phase-time", error);
@@ -95,9 +153,9 @@ function handleSocketConnection(socket: Socket) {
       }
     });
     /* Listen for `reset-phase-time` event */
-    socket.on("reset-phase-time", async (callback) => {
+    socket.on("reset-phase-time", async (data, callback) => {
       try {
-        controllerEmitter.sendResetPhaseTimeEvent();
+        controllerEmitter.sendResetPhaseTimeEvent(data);
         callback({ status: "success" });
       } catch (error) {
         console.error("socketio/reset-phase-time", error);
@@ -110,7 +168,7 @@ function handleSocketConnection(socket: Socket) {
 function initialize(server: HTTPServer) {
   sioServer = new SocketIOServer(server, {
     cors: {
-      origin: PORTAL_CLIENT_DEV_HOSTNAME,
+      origin: IS_DEV ? PORTAL_CLIENT_DEV_HOSTNAME : "",
       credentials: true,
     },
   });

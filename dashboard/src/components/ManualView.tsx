@@ -1,24 +1,25 @@
 import { SingalDetailsView } from "./SignalDetailsView";
 import { Navbar } from "./Navbar";
-import { ISignalsData } from "@/_helpers/validation/signals-data";
+// import { ISignalsData } from "@/_helpers/validation/controller";
 import { useEffect } from "react";
 import { useSignalsDataStore } from "@/_helpers/stores/useSignalsData";
 import { socket } from "@/_services/socketio";
+import { ISignalsData } from "@/_helpers/validation/controller";
 
 export function ManualView() {
   const { setSignalsData } = useSignalsDataStore();
 
   useEffect(() => {
-    socket.on("signals-data", (data: ISignalsData, arg2) => {
-      console.log("Socket Signals Data", data);
+    const handleSocketData = (data: ISignalsData) => {
       setSignalsData(data);
       // if (arg2) {
       //   setConnectedToController(arg2.controllerConnected || false);
       // }
-    });
+    }
+    socket.on("signals-data", handleSocketData);
 
     return () => {
-      socket?.off("signals-data");
+      socket?.off("signals-data", handleSocketData);
     };
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -29,8 +30,8 @@ export function ManualView() {
       <Navbar />
 
       <div className="space-y-20">
-        <SingalDetailsView signal="master" />
-        <SingalDetailsView signal="slave" />
+        <SingalDetailsView signal="master" key={"master"} />
+        <SingalDetailsView signal="slave" key={"slave"} />
       </div>
 
       <footer>

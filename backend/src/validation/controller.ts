@@ -9,9 +9,22 @@ export const phaseValuesObj = z.object({
 
 export type IPhaseValuesObj = z.infer<typeof phaseValuesObj>;
 
+export enum ControllerMode {
+  manual = "manual",
+  smart = "smart",
+  blink = "blink",
+  testing = "testing",
+}
+
 export const signalsDataSchema = z.object({
-  phase_time: phaseValuesObj,
-  cycle_time: z.number(),
+  phase_time: z.object({
+    master: phaseValuesObj,
+    slave: phaseValuesObj,
+  }),
+  cycle_time: z.object({
+    master: z.number(),
+    slave: z.number(),
+  }),
   transition: z.object({
     master: z.boolean().optional(),
     slave: z.boolean().optional(),
@@ -29,20 +42,21 @@ export const signalsDataSchema = z.object({
     slave: phaseValuesObj,
   }),
   current_green: z.object({
-    master: phaseValuesObj,
-    slave: phaseValuesObj,
+    master: z.number().nullable().default(0),
+    slave: z.number().nullable().default(0),
   }),
-  smart_mode: z.object({
-    master: phaseValuesObj,
-    slave: phaseValuesObj,
+  hold: z.object({
+    master: z.boolean(),
+    slave: z.boolean(),
   }),
+  mode: z.nativeEnum(ControllerMode).optional().default(ControllerMode.manual),
 });
 
 export type ISignalsData = z.infer<typeof signalsDataSchema>;
 
 export const holdStateDataSchema = z.object({
-  master: z.number(),
-  slave: z.number(),
+  master: z.boolean(),
+  slave: z.boolean(),
 });
 
 export type IHoldStateData = z.infer<typeof holdStateDataSchema>;

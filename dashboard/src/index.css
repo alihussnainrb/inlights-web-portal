@@ -83,14 +83,17 @@ nav {
   cursor: pointer;
   transition: all 0.3s ease;
 }
+
 .button-wrapper .screens.active {
   background-color: var(--blue);
   color: #fff;
 }
-.button-wrapper .screens:hover {
+.button-wrapper .screens:not(:disabled):hover {
   background-color: var(--blue-hover) !important;
   color: #fff;
 }
+
+
 table {
   width: 100%;
 }
